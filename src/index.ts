@@ -22,12 +22,15 @@ import { GoHandler } from './handlers/go.js'
 
 class PackageVersionServer {
   private server: Server
-  private npmHandler: NpmHandler
-  private pythonHandler: PythonHandler
-  private javaHandler: JavaHandler
-  private goHandler: GoHandler
+  private npmHandler!: NpmHandler
+  private pythonHandler!: PythonHandler
+  private javaHandler!: JavaHandler
+  private goHandler!: GoHandler
+  private enabledTools: Set<string>
 
   constructor() {
+    this.enabledTools = this.getEnabledTools()
+    
     this.server = new Server(
       {
         name: 'package-version-server',
@@ -40,10 +43,18 @@ class PackageVersionServer {
       }
     )
 
-    this.npmHandler = new NpmHandler()
-    this.pythonHandler = new PythonHandler()
-    this.javaHandler = new JavaHandler()
-    this.goHandler = new GoHandler()
+    if (this.isToolEnabled('npm')) {
+      this.npmHandler = new NpmHandler()
+    }
+    if (this.isToolEnabled('python')) {
+      this.pythonHandler = new PythonHandler()
+    }
+    if (this.isToolEnabled('maven') || this.isToolEnabled('gradle')) {
+      this.javaHandler = new JavaHandler()
+    }
+    if (this.isToolEnabled('go')) {
+      this.goHandler = new GoHandler()
+    }
 
     this.setupToolHandlers()
 
@@ -54,11 +65,24 @@ class PackageVersionServer {
     })
   }
 
+  private getEnabledTools(): Set<string> {
+    const enabledStr = process.env.PV_ENABLED_LANGUAGES_FRAMEWORKS
+    if (!enabledStr) {
+      return new Set(['npm', 'python', 'maven', 'gradle', 'go'])
+    }
+    return new Set(enabledStr.toLowerCase().split(',').map(s => s.trim()))
+  }
+
+  private isToolEnabled(tool: string): boolean {
+    return this.enabledTools.has(tool.toLowerCase())
+  }
+
   private setupToolHandlers() {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      const allTools = [
         {
           name: 'check_npm_versions',
+          enabled: this.isToolEnabled('npm'),
           description: 'Check latest stable versions for npm packages',
           inputSchema: {
             type: 'object',
@@ -76,6 +100,7 @@ class PackageVersionServer {
         },
         {
           name: 'check_python_versions',
+          enabled: this.isToolEnabled('python'),
           description: 'Check latest stable versions for Python packages',
           inputSchema: {
             type: 'object',
@@ -93,6 +118,7 @@ class PackageVersionServer {
         },
         {
           name: 'check_pyproject_versions',
+          enabled: this.isToolEnabled('python'),
           description: 'Check latest stable versions for Python packages in pyproject.toml',
           inputSchema: {
             type: 'object',
@@ -133,6 +159,7 @@ class PackageVersionServer {
         },
         {
           name: 'check_maven_versions',
+          enabled: this.isToolEnabled('maven'),
           description: 'Check latest stable versions for Java packages in pom.xml',
           inputSchema: {
             type: 'object',
@@ -169,6 +196,7 @@ class PackageVersionServer {
         },
         {
           name: 'check_gradle_versions',
+          enabled: this.isToolEnabled('gradle'),
           description: 'Check latest stable versions for Java packages in build.gradle',
           inputSchema: {
             type: 'object',
@@ -205,6 +233,7 @@ class PackageVersionServer {
         },
         {
           name: 'check_go_versions',
+          enabled: this.isToolEnabled('go'),
           description: 'Check latest stable versions for Go packages in go.mod',
           inputSchema: {
             type: 'object',
@@ -264,8 +293,14 @@ class PackageVersionServer {
             required: ['dependencies'],
           },
         },
-      ],
-    }))
+      ]
+
+      const enabledTools = allTools.filter(tool => tool.enabled)
+      
+      return {
+        tools: enabledTools.map(({ enabled, ...tool }) => tool)
+      }
+    })
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (!request.params.arguments) {
@@ -275,19 +310,27 @@ class PackageVersionServer {
         )
       }
 
+      const toolName = request.params.name.split('_')[1]?.split('_')[0]
+      if (!this.isToolEnabled(toolName)) {
+        throw new McpError(
+          ErrorCode.MethodNotFound,
+          `Tool ${request.params.name} is not enabled`
+        )
+      }
+
       switch (request.params.name) {
         case 'check_npm_versions':
-          return this.npmHandler.getLatestVersion(request.params.arguments as { dependencies: NpmDependencies })
+          return this.npmHandler?.getLatestVersion(request.params.arguments as { dependencies: NpmDependencies })
         case 'check_python_versions':
-          return this.pythonHandler.getLatestVersionFromRequirements(request.params.arguments as { requirements: string[] })
+          return this.pythonHandler?.getLatestVersionFromRequirements(request.params.arguments as { requirements: string[] })
         case 'check_pyproject_versions':
-          return this.pythonHandler.getLatestVersion(request.params.arguments as { dependencies: PyProjectDependencies })
+          return this.pythonHandler?.getLatestVersion(request.params.arguments as { dependencies: PyProjectDependencies })
         case 'check_maven_versions':
-          return this.javaHandler.getLatestVersionFromMaven(request.params.arguments as { dependencies: MavenDependency[] })
+          return this.javaHandler?.getLatestVersionFromMaven(request.params.arguments as { dependencies: MavenDependency[] })
         case 'check_gradle_versions':
-          return this.javaHandler.getLatestVersion(request.params.arguments as { dependencies: GradleDependency[] })
+          return this.javaHandler?.getLatestVersion(request.params.arguments as { dependencies: GradleDependency[] })
         case 'check_go_versions':
-          return this.goHandler.getLatestVersion(request.params.arguments as { dependencies: GoModule })
+          return this.goHandler?.getLatestVersion(request.params.arguments as { dependencies: GoModule })
         default:
           throw new McpError(
             ErrorCode.MethodNotFound,

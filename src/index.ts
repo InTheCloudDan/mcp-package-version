@@ -293,6 +293,45 @@ class PackageVersionServer {
             required: ['dependencies'],
           },
         },
+        {
+          name: 'search_npm_packages',
+          enabled: this.isToolEnabled('npm'),
+          description: 'Search for NPM packages using the registry search API',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: 'Search query text'
+              },
+              size: {
+                type: 'number',
+                description: 'Number of results to return (max 250)',
+                minimum: 1,
+                maximum: 250
+              },
+              quality: {
+                type: 'number',
+                description: 'Weight of quality in search results (0-1)',
+                minimum: 0,
+                maximum: 1
+              },
+              popularity: {
+                type: 'number',
+                description: 'Weight of popularity in search results (0-1)',
+                minimum: 0,
+                maximum: 1
+              },
+              maintenance: {
+                type: 'number',
+                description: 'Weight of maintenance in search results (0-1)',
+                minimum: 0,
+                maximum: 1
+              }
+            },
+            required: ['query']
+          }
+        },
       ]
 
       const enabledTools = allTools.filter(tool => tool.enabled)
@@ -331,6 +370,14 @@ class PackageVersionServer {
           return this.javaHandler?.getLatestVersion(request.params.arguments as { dependencies: GradleDependency[] })
         case 'check_go_versions':
           return this.goHandler?.getLatestVersion(request.params.arguments as { dependencies: GoModule })
+        case 'search_npm_packages':
+          return this.npmHandler?.searchPackages(request.params.arguments as {
+            query: string,
+            size?: number,
+            quality?: number,
+            popularity?: number,
+            maintenance?: number
+          })
         default:
           throw new McpError(
             ErrorCode.MethodNotFound,
